@@ -43,57 +43,37 @@ class RobotCanvas(FigureCanvas):
 
     def get_frame_axes(self, q1, q2, q3, q4):
         """Calcula las matrices de rotación para cada frame DH (0 a 4).
-        Retorna una lista de 5 matrices de rotación 3x3, una por cada frame.
-        Según el diagrama:
-          Frame 0 (Base):  X0 horizontal, Z0 vertical (identidad)
-          Frame 1 (p1):    Rotación por q1 alrededor de Z0, luego Z1 apunta horizontal
-          Frame 2 (p2):    Z2 sale perpendicular al plano del brazo, X2 a lo largo del eslabón
-          Frame 3 (p3):    Igual que Frame 2 pero acumulando q3
-          Frame 4 (p4):    Igual pero acumulando q4
+        Para frames 1-4: Y y Z están invertidos 180° respecto al cálculo DH estándar.
         """
         t1, t2, t3, t4 = np.radians([q1, q2, q3, q4])
 
-        # Frame 0: Base - identidad (X0 → +X global, Z0 → +Z global)
+        # Frame 0: Base - identidad (sin cambios)
         R0 = np.eye(3)
 
-        # Frame 1: Después de rotación q1 alrededor de Z0
-        # Z1 apunta en la dirección horizontal (perpendicular al plano del brazo)
-        # X1 apunta a lo largo del eslabón hacia el siguiente joint
-        # Según DH: Z1 = [-sin(t1), cos(t1), 0], X1 = [cos(t1)*cos(t2), sin(t1)*cos(t2), sin(t2)]
-        # Pero en el frame 1 (antes de q2), X1 apunta horizontal en dirección del brazo
-        R1 = np.array([
-            [np.cos(t1), -np.sin(t1), 0],
-            [np.sin(t1),  np.cos(t1), 0],
-            [0,           0,          1]
-        ])
-        # Ajuste: Z1 apunta horizontal (perpendicular al plano vertical del brazo)
-        # Según el diagrama, Z1 sale "hacia nosotros" → es el eje Y rotado por t1
-        # X1 apunta en la dirección del eslabón
-        # Rotación adicional: Z del frame DH 1 es el eje de rotación de q2
-        # que es [-sin(t1), cos(t1), 0]
-        z1 = np.array([-np.sin(t1), np.cos(t1), 0])
+        # Frame 1
         x1 = np.array([np.cos(t1)*np.cos(t2), np.sin(t1)*np.cos(t2), np.sin(t2)])
-        y1 = np.cross(z1, x1)
+        z1 = -np.array([-np.sin(t1), np.cos(t1), 0])  # invertido
+        y1 = -np.cross(np.array([-np.sin(t1), np.cos(t1), 0]), x1)  # invertido
         R1 = np.column_stack([x1, y1, z1])
 
-        # Frame 2: Acumula q2
+        # Frame 2
         t23 = t2 + t3
-        z2 = np.array([-np.sin(t1), np.cos(t1), 0])
         x2 = np.array([np.cos(t1)*np.cos(t23), np.sin(t1)*np.cos(t23), np.sin(t23)])
-        y2 = np.cross(z2, x2)
+        z2 = -np.array([-np.sin(t1), np.cos(t1), 0])
+        y2 = -np.cross(np.array([-np.sin(t1), np.cos(t1), 0]), x2)
         R2 = np.column_stack([x2, y2, z2])
 
-        # Frame 3: Acumula q2 + q3
+        # Frame 3
         t234 = t2 + t3 + t4
-        z3 = np.array([-np.sin(t1), np.cos(t1), 0])
         x3 = np.array([np.cos(t1)*np.cos(t234), np.sin(t1)*np.cos(t234), np.sin(t234)])
-        y3 = np.cross(z3, x3)
+        z3 = -np.array([-np.sin(t1), np.cos(t1), 0])
+        y3 = -np.cross(np.array([-np.sin(t1), np.cos(t1), 0]), x3)
         R3 = np.column_stack([x3, y3, z3])
 
-        # Frame 4: Efector final (misma orientación que frame 3 pero en p4)
-        z4 = np.array([-np.sin(t1), np.cos(t1), 0])
+        # Frame 4
         x4 = np.array([np.cos(t1)*np.cos(t234), np.sin(t1)*np.cos(t234), np.sin(t234)])
-        y4 = np.cross(z4, x4)
+        z4 = -np.array([-np.sin(t1), np.cos(t1), 0])
+        y4 = -np.cross(np.array([-np.sin(t1), np.cos(t1), 0]), x4)
         R4 = np.column_stack([x4, y4, z4])
 
         return [R0, R1, R2, R3, R4]
@@ -158,14 +138,12 @@ class RobotCanvas(FigureCanvas):
         self.axes.plot(x, y, z, '-o', linewidth=5, markersize=8, color='#2c3e50', markerfacecolor='#e74c3c')
         self.axes.scatter(x[-1], y[-1], z[-1], color='red', s=100)
 
-        # ---- Dibujar sistemas de coordenadas (ejes X, Y, Z) para cada frame ----
+        # ---- Dibujar sistemas de coordenadas para cada frame ----
         frames = self.get_frame_axes(q1, q2, q3, q4)
-        axis_len = 4.0  # Longitud de las flechas en cm
+        axis_len = 4.0
 
         for i, (origin, R) in enumerate(zip(self.joint_coords, frames)):
             ox, oy, oz = origin[0], origin[1], origin[2]
-            
-            # Columnas de R: X, Y, Z del frame
             x_dir = R[:, 0] * axis_len
             y_dir = R[:, 1] * axis_len
             z_dir = R[:, 2] * axis_len

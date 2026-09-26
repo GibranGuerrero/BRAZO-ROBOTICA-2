@@ -41,6 +41,63 @@ class RobotCanvas(FigureCanvas):
         self.axes.set_zlabel('Z (cm)')
         self.axes.set_title("Gemelo Digital Manipulador")
 
+    def get_frame_axes(self, q1, q2, q3, q4):
+        """Calcula las matrices de rotación para cada frame DH (0 a 4).
+        Retorna una lista de 5 matrices de rotación 3x3, una por cada frame.
+        Según el diagrama:
+          Frame 0 (Base):  X0 horizontal, Z0 vertical (identidad)
+          Frame 1 (p1):    Rotación por q1 alrededor de Z0, luego Z1 apunta horizontal
+          Frame 2 (p2):    Z2 sale perpendicular al plano del brazo, X2 a lo largo del eslabón
+          Frame 3 (p3):    Igual que Frame 2 pero acumulando q3
+          Frame 4 (p4):    Igual pero acumulando q4
+        """
+        t1, t2, t3, t4 = np.radians([q1, q2, q3, q4])
+
+        # Frame 0: Base - identidad (X0 → +X global, Z0 → +Z global)
+        R0 = np.eye(3)
+
+        # Frame 1: Después de rotación q1 alrededor de Z0
+        # Z1 apunta en la dirección horizontal (perpendicular al plano del brazo)
+        # X1 apunta a lo largo del eslabón hacia el siguiente joint
+        # Según DH: Z1 = [-sin(t1), cos(t1), 0], X1 = [cos(t1)*cos(t2), sin(t1)*cos(t2), sin(t2)]
+        # Pero en el frame 1 (antes de q2), X1 apunta horizontal en dirección del brazo
+        R1 = np.array([
+            [np.cos(t1), -np.sin(t1), 0],
+            [np.sin(t1),  np.cos(t1), 0],
+            [0,           0,          1]
+        ])
+        # Ajuste: Z1 apunta horizontal (perpendicular al plano vertical del brazo)
+        # Según el diagrama, Z1 sale "hacia nosotros" → es el eje Y rotado por t1
+        # X1 apunta en la dirección del eslabón
+        # Rotación adicional: Z del frame DH 1 es el eje de rotación de q2
+        # que es [-sin(t1), cos(t1), 0]
+        z1 = np.array([-np.sin(t1), np.cos(t1), 0])
+        x1 = np.array([np.cos(t1)*np.cos(t2), np.sin(t1)*np.cos(t2), np.sin(t2)])
+        y1 = np.cross(z1, x1)
+        R1 = np.column_stack([x1, y1, z1])
+
+        # Frame 2: Acumula q2
+        t23 = t2 + t3
+        z2 = np.array([-np.sin(t1), np.cos(t1), 0])
+        x2 = np.array([np.cos(t1)*np.cos(t23), np.sin(t1)*np.cos(t23), np.sin(t23)])
+        y2 = np.cross(z2, x2)
+        R2 = np.column_stack([x2, y2, z2])
+
+        # Frame 3: Acumula q2 + q3
+        t234 = t2 + t3 + t4
+        z3 = np.array([-np.sin(t1), np.cos(t1), 0])
+        x3 = np.array([np.cos(t1)*np.cos(t234), np.sin(t1)*np.cos(t234), np.sin(t234)])
+        y3 = np.cross(z3, x3)
+        R3 = np.column_stack([x3, y3, z3])
+
+        # Frame 4: Efector final (misma orientación que frame 3 pero en p4)
+        z4 = np.array([-np.sin(t1), np.cos(t1), 0])
+        x4 = np.array([np.cos(t1)*np.cos(t234), np.sin(t1)*np.cos(t234), np.sin(t234)])
+        y4 = np.cross(z4, x4)
+        R4 = np.column_stack([x4, y4, z4])
+
+        return [R0, R1, R2, R3, R4]
+
     def get_matrices_dh(self, q1, q2, q3, q4):
         l12, l3, l4, l5, l6 = 8.7576, 1.05, 10.4, 8.8, 6.95
         t1, t2, t3, t4 = np.radians([q1, q2, q3, q4])
@@ -100,6 +157,36 @@ class RobotCanvas(FigureCanvas):
 
         self.axes.plot(x, y, z, '-o', linewidth=5, markersize=8, color='#2c3e50', markerfacecolor='#e74c3c')
         self.axes.scatter(x[-1], y[-1], z[-1], color='red', s=100)
+
+        # ---- Dibujar sistemas de coordenadas (ejes X, Y, Z) para cada frame ----
+        frames = self.get_frame_axes(q1, q2, q3, q4)
+        axis_len = 4.0  # Longitud de las flechas en cm
+
+        for i, (origin, R) in enumerate(zip(self.joint_coords, frames)):
+            ox, oy, oz = origin[0], origin[1], origin[2]
+            
+            # Columnas de R: X, Y, Z del frame
+            x_dir = R[:, 0] * axis_len
+            y_dir = R[:, 1] * axis_len
+            z_dir = R[:, 2] * axis_len
+
+            # Eje X → Azul
+            self.axes.quiver(ox, oy, oz, x_dir[0], x_dir[1], x_dir[2],
+                             color='#2196F3', arrow_length_ratio=0.15, linewidth=1.8)
+            self.axes.text(ox + x_dir[0]*1.15, oy + x_dir[1]*1.15, oz + x_dir[2]*1.15,
+                           f'X{i}', color='#2196F3', fontsize=7, fontweight='bold')
+
+            # Eje Y → Verde
+            self.axes.quiver(ox, oy, oz, y_dir[0], y_dir[1], y_dir[2],
+                             color='#4CAF50', arrow_length_ratio=0.15, linewidth=1.8)
+            self.axes.text(ox + y_dir[0]*1.15, oy + y_dir[1]*1.15, oz + y_dir[2]*1.15,
+                           f'Y{i}', color='#4CAF50', fontsize=7, fontweight='bold')
+
+            # Eje Z → Rojo
+            self.axes.quiver(ox, oy, oz, z_dir[0], z_dir[1], z_dir[2],
+                             color='#F44336', arrow_length_ratio=0.15, linewidth=1.8)
+            self.axes.text(ox + z_dir[0]*1.15, oy + z_dir[1]*1.15, oz + z_dir[2]*1.15,
+                           f'Z{i}', color='#F44336', fontsize=7, fontweight='bold')
 
         self.annot = self.axes.annotate("", xy=(0,0), xytext=(15,15),
                                         textcoords="offset points",
